@@ -1,0 +1,19 @@
+{
+  "name": "lzv-scraper",
+  "version": "1.0.0",
+  "description": "A scraper for the LZV website",
+  "main": "index.js",
+  "scripts": {
+    "scrape": "ts-node index.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "puppeteer": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/puppeteer": "^5.4.6",
+    "ts-node": "^10.7.0",
+    "typescript": "^4.6.4"
+  }
+}
