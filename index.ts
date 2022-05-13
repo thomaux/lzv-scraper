@@ -1,5 +1,6 @@
 import * as puppeteer from 'puppeteer';
 import { Browser, ElementHandle, Page } from 'puppeteer';
+import { writeFile } from 'fs/promises';
 
 type ScrapeRegionResult = {
    name: string;
@@ -89,7 +90,7 @@ async function scrapeRegions(
 }
 
 async function output(result: ScrapeRegionResult[]): Promise<void> {
-   console.log(result)
+   return writeFile('output.json', JSON.stringify(result, undefined, 4));
 }
 
 async function scrape() {
