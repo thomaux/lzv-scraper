@@ -10,7 +10,7 @@ const LZV_HOME = 'https://www.lzvcup.be';
 
 // TODO: make a scraper for the teams?
 
-async function recursiveScrapeGyms($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
+async function scrapeGyms($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
    if(!$gyms.length) {
       return result;
    }
@@ -21,24 +21,48 @@ async function recursiveScrapeGyms($gyms: ElementHandle<Element>[], result: stri
 
    result.push(gymName);
 
-   return recursiveScrapeGyms($gyms, result, page);
+   return scrapeGyms($gyms, result, page);
 }
 
-//! there are multiple 'Sporthallen' links per region page!
-async function getGymsForRegion(regionHref: string, browser: Browser): Promise<string[]> {
+async function scrapeCompetitions(gymHrefs: string[], result: string[], browser: Browser): Promise<string[]> {
+   if(!gymHrefs.length) {
+      return result;
+   }
+
+   const curHref = gymHrefs.shift() as string;
+   const page = await browser.newPage();
+
+   await page.goto(curHref);
+
+   const $gyms = await page.$x('//h5[@class="card-title"]');
+
+   return scrapeCompetitions(gymHrefs, await scrapeGyms($gyms, result, page), browser);
+}
+
+async function scrapeGymHrefs($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
+   if(!$gyms.length) {
+      return result;
+   }
+
+   const $curGym = $gyms.shift() as ElementHandle<Element>;
+   const gymHref = await page.evaluate(el => el.href, $curGym);
+
+   result.push(gymHref);
+
+   return scrapeGymHrefs($gyms, result, page);
+}
+
+async function scrapeGymsForRegion(regionHref: string, browser: Browser): Promise<string[]> {
    const page = await browser.newPage();
    await page.goto(regionHref);
 
-   const $gyms = await page.waitForXPath('//a[@class="btn btn-outline-primary"][text()[contains(.,"Sporthallen")]]');
-   const gymHref = await page.evaluate(el => el.href, $gyms);
+   const $gyms = await page.$x('//a[@class="btn btn-outline-primary"][text()[contains(.,"Sporthallen")]]');
+   const gymHrefs = await scrapeGymHrefs($gyms, [], page);
 
-   await page.goto(gymHref);
-
-   const $gymNames = await page.$x('//h5[@class="card-title"]');
-   return recursiveScrapeGyms($gymNames, [], page);
+   return scrapeCompetitions(gymHrefs, [], browser);
 }
 
-async function recursiveScrapeRegions(
+async function scrapeRegions(
    $regions: ElementHandle<Element>[],
    result: ScrapeRegionResult[],
    page: Page,
@@ -54,14 +78,18 @@ async function recursiveScrapeRegions(
       text: el.textContent as string,
    }), $curRegion);
 
-   const gyms = await getGymsForRegion(href, browser);
+   const gyms = await scrapeGymsForRegion(href, browser);
 
    result.push({
       name: text,
       gyms,
    });
 
-   return recursiveScrapeRegions($regions, result, page, browser);
+   return scrapeRegions($regions, result, page, browser);
+}
+
+async function output(result: ScrapeRegionResult[]): Promise<void> {
+   console.log(result)
 }
 
 async function scrape() {
@@ -75,10 +103,10 @@ async function scrape() {
    const $regions = await page.$$("#lzvmainnav .dropdown-item");
 
    // Recurse through all regions
-   const result = await recursiveScrapeRegions($regions, [], page, browser);
+   const result = await scrapeRegions($regions, [], page, browser);
 
    // Output the result
-   console.log(result)
-   browser.close()
+   await output(result);
+   browser.close();
 }
 scrape();
