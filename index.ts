@@ -20,7 +20,9 @@ async function scrapeGyms($gyms: ElementHandle<Element>[], result: string[], pag
 
    const gymName = await page.evaluate( (el: Element) => el.textContent.substring(3), $curGym);
 
-   result.push(gymName);
+   if(!result.includes(gymName)) {
+      result.push(gymName);
+   }
 
    return scrapeGyms($gyms, result, page);
 }
