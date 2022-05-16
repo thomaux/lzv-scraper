@@ -2,15 +2,20 @@ import * as puppeteer from 'puppeteer';
 import { Browser, ElementHandle, Page } from 'puppeteer';
 import { writeFile } from 'fs/promises';
 
-type ScrapeRegionResult = {
+type Named = {
    name: string;
-   gyms: string[];
 };
 
+type ScrapeRegionResult = GymsAndLowestLevelForRegion & Named;
+
 type RegionLink = {
-   name: string;
    href: string;
-}
+} & Named;
+
+type GymsAndLowestLevelForRegion = {
+   gyms: string[];
+   lowestPossibleLevel: number;
+};
 
 const LZV_HOME = 'https://www.lzvcup.be';
 
@@ -63,16 +68,35 @@ async function getCompetitionGymLinks($gyms: ElementHandle<Element>[], result: s
    return getCompetitionGymLinks($gyms, result, page);
 }
 
-async function getGymsForRegion(regionHref: string, browser: Browser): Promise<string[]> {
+async function getLowestPossibleLevelOfRegion($competitionLinks: ElementHandle<Element>[], result: number, page: Page): Promise<number> {
+   if(!$competitionLinks.length) {
+      return result;
+   }
+
+   const $curLink = $competitionLinks.shift() as ElementHandle<Element>;
+   const curLevel = await page.evaluate((el: HTMLButtonElement) => parseInt(el.textContent.match(/\d+/)[0]), $curLink);
+
+   return getLowestPossibleLevelOfRegion($competitionLinks, curLevel > result ? curLevel : result, page);
+}
+
+async function getGymsAndLowestLevelForRegion(regionHref: string, browser: Browser): Promise<GymsAndLowestLevelForRegion> {
    const page = await browser.newPage();
    await page.goto(regionHref);
 
    const $gyms = await page.$x('//a[@class="btn btn-outline-primary"][text()[contains(.,"Sporthallen")]]');
    const competitionGymLinks = await getCompetitionGymLinks($gyms, [], page);
+   
+   const $competitions = await page.$x('//a[@class="btn btn-outline-primary"][text()[not(contains(.,"Sporthallen"))]]');
+   const lowestPossibleLevel = await getLowestPossibleLevelOfRegion($competitions, 1, page);
 
    await page.close();
 
-   return getGymsOfCompetition(competitionGymLinks, [], browser);
+   const gyms = await getGymsOfCompetition(competitionGymLinks, [], browser);
+
+   return {
+      lowestPossibleLevel,
+      gyms,
+   };
 }
 
 async function getRegions(
@@ -85,11 +109,11 @@ async function getRegions(
 
    const { name, href } = regionLinks.shift() as RegionLink;
 
-   const gyms = await getGymsForRegion(href, browser);
+   const gymsAndLowestLevel = await getGymsAndLowestLevelForRegion(href, browser);
 
    result.push({
       name,
-      gyms,
+      ...gymsAndLowestLevel,
    });
 
    return getRegions(regionLinks, result, browser);
