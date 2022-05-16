@@ -7,11 +7,16 @@ type ScrapeRegionResult = {
    gyms: string[];
 };
 
+type RegionLink = {
+   name: string;
+   href: string;
+}
+
 const LZV_HOME = 'https://www.lzvcup.be';
 
 // TODO: make a scraper for the teams?
 
-async function scrapeGyms($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
+async function getGyms($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
    if(!$gyms.length) {
       return result;
    }
@@ -24,25 +29,28 @@ async function scrapeGyms($gyms: ElementHandle<Element>[], result: string[], pag
       result.push(gymName);
    }
 
-   return scrapeGyms($gyms, result, page);
+   return getGyms($gyms, result, page);
 }
 
-async function scrapeCompetitions(gymHrefs: string[], result: string[], browser: Browser): Promise<string[]> {
-   if(!gymHrefs.length) {
+async function getGymsOfCompetition(competitionGymLinks: string[], result: string[], browser: Browser): Promise<string[]> {
+   if(!competitionGymLinks.length) {
       return result;
    }
 
-   const curHref = gymHrefs.shift() as string;
+   const curLink = competitionGymLinks.shift() as string;
    const page = await browser.newPage();
 
-   await page.goto(curHref);
+   await page.goto(curLink);
 
    const $gyms = await page.$x('//h5[@class="card-title"]');
 
-   return scrapeCompetitions(gymHrefs, await scrapeGyms($gyms, result, page), browser);
+   await getGyms($gyms, result, page)
+   await page.close();
+
+   return getGymsOfCompetition(competitionGymLinks, result, browser);
 }
 
-async function scrapeGymHrefs($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
+async function getCompetitionGymLinks($gyms: ElementHandle<Element>[], result: string[], page: Page): Promise<string[]> {
    if(!$gyms.length) {
       return result;
    }
@@ -52,47 +60,64 @@ async function scrapeGymHrefs($gyms: ElementHandle<Element>[], result: string[],
 
    result.push(gymHref);
 
-   return scrapeGymHrefs($gyms, result, page);
+   return getCompetitionGymLinks($gyms, result, page);
 }
 
-async function scrapeGymsForRegion(regionHref: string, browser: Browser): Promise<string[]> {
+async function getGymsForRegion(regionHref: string, browser: Browser): Promise<string[]> {
    const page = await browser.newPage();
    await page.goto(regionHref);
 
    const $gyms = await page.$x('//a[@class="btn btn-outline-primary"][text()[contains(.,"Sporthallen")]]');
-   const gymHrefs = await scrapeGymHrefs($gyms, [], page);
+   const competitionGymLinks = await getCompetitionGymLinks($gyms, [], page);
 
-   return scrapeCompetitions(gymHrefs, [], browser);
+   await page.close();
+
+   return getGymsOfCompetition(competitionGymLinks, [], browser);
 }
 
-async function scrapeRegions(
-   $regions: ElementHandle<Element>[],
+async function getRegions(
+   regionLinks: RegionLink[],
    result: ScrapeRegionResult[],
-   page: Page,
    browser: Browser): Promise<ScrapeRegionResult[]> {
-   if (!$regions.length) {
+   if (!regionLinks.length) {
+      return result;
+   }
+
+   const { name, href } = regionLinks.shift() as RegionLink;
+
+   const gyms = await getGymsForRegion(href, browser);
+
+   result.push({
+      name,
+      gyms,
+   });
+
+   return getRegions(regionLinks, result, browser);
+}
+
+async function output(result: ScrapeRegionResult[]): Promise<void> {
+   return writeFile('output.json', JSON.stringify(result, undefined, 4));
+}
+
+async function getRegionLinks(
+   $regions: ElementHandle<Element>[],
+   result: RegionLink[],
+   page: Page,
+): Promise<RegionLink[]> {
+   if(!$regions.length) {
       return result;
    }
 
    const $curRegion = $regions.shift() as ElementHandle<Element>;
 
-   const { href, text } = await page.evaluate(el => ({
+   const link = await page.evaluate(el => ({
       href: el.href as string,
-      text: el.textContent as string,
+      name: el.textContent as string,
    }), $curRegion);
 
-   const gyms = await scrapeGymsForRegion(href, browser);
+   result.push(link);
 
-   result.push({
-      name: text,
-      gyms,
-   });
-
-   return scrapeRegions($regions, result, page, browser);
-}
-
-async function output(result: ScrapeRegionResult[]): Promise<void> {
-   return writeFile('output.json', JSON.stringify(result, undefined, 4));
+   return getRegionLinks($regions, result, page);
 }
 
 async function scrape() {
@@ -105,8 +130,11 @@ async function scrape() {
    // Fetch all regions from the main drop down
    const $regions = await page.$$("#lzvmainnav .dropdown-item");
 
+   const regionLinks = await getRegionLinks($regions, [], page);
+   await page.close();
+
    // Recurse through all regions
-   const result = await scrapeRegions($regions, [], page, browser);
+   const result = await getRegions(regionLinks, [], browser);
 
    // Output the result
    await output(result);
